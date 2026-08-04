@@ -91,6 +91,16 @@ input[type=number],input[type=text],select{padding:10px 12px;border:1px solid va
   font-size:15px;font-weight:700;cursor:pointer}
 .btn3{padding:10px 0;border:1px solid var(--line);border-radius:10px;background:var(--surface);
   color:var(--ink);font-size:14px;font-weight:600;cursor:pointer}
+.pt-item{display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+.pt-item:last-child{border-bottom:none}
+.pt-item .ico{flex:none;font-size:18px;width:24px;text-align:center}
+.pt-item .nm{font-weight:700}
+.pt-item .meta{font-size:12px;color:var(--ink-soft)}
+.pt-item .dist{margin-left:auto;text-align:right;font-size:12.5px;color:var(--teal);font-weight:700;
+  font-variant-numeric:tabular-nums;flex:none;white-space:nowrap}
+.badge{display:inline-block;font-size:10.5px;border:1px solid var(--line);border-radius:5px;
+  padding:0 5px;margin-left:6px;color:var(--ink-soft);vertical-align:1px}
+.badge.my{color:var(--accent);border-color:var(--accent)}
 .subtle{font-size:12.5px;color:var(--ink-soft)}
 .groupttl{font-size:13px;font-weight:800;color:var(--teal);margin:14px 0 2px}
 .empty{padding:20px;text-align:center;color:var(--ink-soft)}
@@ -118,6 +128,14 @@ input[type=number],input[type=text],select{padding:10px 12px;border:1px solid va
       <div class="ttl"><b id="wxTitle">現地の状況</b><button onclick="fetchWx(true)">再取得</button></div>
       <div class="data" id="wxData">取得中…</div>
     </div>
+  </div>
+  <div class="card">
+    <span class="lbl">ポイントサーチ</span>
+    <div class="chips" id="cRadius"></div>
+    <button class="btn2" id="btnScan" onclick="scanPoints()" style="width:100%;margin-top:10px">📍 現在地から有力ポイントを探す</button>
+    <div id="pointList"></div>
+    <button class="btn3" onclick="saveMyPoint()" style="width:100%;margin-top:10px">★ 今いる場所をマイポイント登録</button>
+    <p class="hint">地図(OpenStreetMap)の地物と、登録済みマイポイントから探します。登録時は下で選択中の「ポイント種別・水深」がその場所の属性として保存されます。</p>
   </div>
   <div class="card">
     <span class="lbl">月</span>
@@ -165,6 +183,11 @@ input[type=number],input[type=text],select{padding:10px 12px;border:1px solid va
       <button class="btn2" onclick="addField()">フィールドを追加</button>
       <p class="hint">緯度・経度が空でも登録できます(その場合、天気の自動取得は無効)。</p>
     </div>
+  </div>
+  <div class="card">
+    <span class="lbl">マイポイント</span>
+    <div id="myPointList"></div>
+    <p class="hint">登録は「ガイド」タブの「★ 今いる場所をマイポイント登録」から。</p>
   </div>
   <div class="card">
     <span class="lbl">ルアーボックス</span>
@@ -284,7 +307,9 @@ const state = {
   month:new Date().getMonth()+1, time:'day', sky:'fine', wind:'breeze',
   clarity:'stain', cover:'none', depth:'unknown',
   fieldId:null, fieldType:'lake', autoTemp:null,
+  radius:100, activePoint:null,
 };
+const RADII = {100:'100m', 300:'300m', 500:'500m'};
 
 const SAMPLE_LURES = [
  {name:'ペンシルベイト 95', cat:'pencil', color:'natural'},
@@ -319,6 +344,9 @@ function save(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} 
 let lures = load('bfg_lures') || SAMPLE_LURES.slice();
 let rods = load('bfg_rods') || SAMPLE_RODS.slice();
 let fields = load('bfg_fields') || PRESET_FIELDS.slice();
+let myPoints = load('bfg_mypoints') || [];
+let foundPoints = [];
+let lastPos = null;
 let clarMemo = load('bfg_clar') || {};
 let isSample = load('bfg_custom') ? false : true;
 state.fieldId = load('bfg_lastfield') || (fields[0] ? fields[0].id : 'other');
@@ -364,8 +392,8 @@ function buildForm(){
   chips('cClarity',CLARITY,'clarity');
   chips('cFieldType',FTYPE,'fieldType');
   renderFieldChips();
-  const cov={}; Object.keys(COVERS).forEach(k=>cov[k]=COVERS[k].label);
-  chips('cCover',cov,'cover'); chips('cDepth',DEPTH,'depth');
+  chips('cRadius',RADII,'radius');
+  chips('cCover',covOpts(),'cover'); chips('cDepth',DEPTH,'depth');
   const sel=document.getElementById('fLureCat');
   sel.innerHTML = CATS.map(c=>`<option value="${c.id}">${c.label}</option>`).join('');
 }
@@ -479,6 +507,178 @@ function gpsFill(){
   );
 }
 
+/* ============ GPSポイントサーチ ============ */
+function covOpts(){ const o={}; Object.keys(COVERS).forEach(k=>o[k]=COVERS[k].label); return o; }
+const OVERPASS_EP=[
+ 'https://overpass-api.de/api/interpreter',
+ 'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+ 'https://overpass.private.coffee/api/interpreter',
+ 'https://overpass.kumi.systems/api/interpreter',
+];
+const PT_ICON={inflow:'💧',bridge:'🌉',pier:'⚓',reed:'🌾',rock:'🪨',overhang:'🌳',wood:'🪵',weed:'🌿',open:'🌊',none:'📍'};
+
+function hav(lat1,lon1,lat2,lon2){
+  const R=6371000, r=Math.PI/180;
+  const a=Math.sin((lat2-lat1)*r/2)**2 + Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin((lon2-lon1)*r/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
+function dir8(lat1,lon1,lat2,lon2){
+  const r=Math.PI/180;
+  const y=Math.sin((lon2-lon1)*r)*Math.cos(lat2*r);
+  const x=Math.cos(lat1*r)*Math.sin(lat2*r)-Math.sin(lat1*r)*Math.cos(lat2*r)*Math.cos((lon2-lon1)*r);
+  const b=(Math.atan2(y,x)*180/Math.PI+360)%360;
+  return ['北','北東','東','南東','南','南西','西','北西'][Math.round(b/45)%8];
+}
+function getGPS(){
+  return new Promise((res,rej)=>{
+    if(!navigator.geolocation){ rej(new Error('nogeo')); return; }
+    navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:12000,maximumAge:30000});
+  });
+}
+function classifyOSM(tags){
+  if(!tags) return null;
+  if(tags.waterway==='dam'||tags.man_made==='dam') return {cover:'rock',label:'ダムサイト(岩盤)'};
+  if(tags.waterway) return {cover:'inflow',label:tags.tunnel?'流れ込み(暗渠出口)':'流れ込み'};
+  if(tags.bridge||tags.man_made==='bridge') return {cover:'bridge',label:'橋'};
+  if(tags.man_made==='pier'||tags.leisure==='slipway'||tags.man_made==='breakwater'||tags.man_made==='groyne') return {cover:'pier',label:'桟橋・突堤'};
+  if(tags.natural==='wetland'||tags.natural==='reed') return {cover:'reed',label:'アシ・湿地'};
+  if(tags.natural==='scrub') return {cover:'reed',label:'ブッシュ'};
+  if(tags.natural==='bare_rock'||tags.natural==='cliff'||tags.natural==='rock') return {cover:'rock',label:'岩盤'};
+  if(tags.natural==='tree_row') return {cover:'overhang',label:'オーバーハング(並木)'};
+  return null;
+}
+async function overpass(lat,lon,r){
+  const q=`[out:json][timeout:10];(`
+    +`way(around:${r},${lat},${lon})[waterway~"^(stream|river|ditch|drain|canal|dam)$"];`
+    +`way(around:${r},${lat},${lon})[bridge];`
+    +`way(around:${r},${lat},${lon})[man_made~"^(pier|breakwater|groyne|dam)$"];`
+    +`node(around:${r},${lat},${lon})[man_made=pier];`
+    +`way(around:${r},${lat},${lon})[natural~"^(wetland|reed|scrub|bare_rock|cliff|rock|tree_row)$"];`
+    +`way(around:${r},${lat},${lon})[leisure=slipway];`
+    +`);out geom qt 40;`;
+  let lastErr=null;
+  for(const ep of OVERPASS_EP){
+    try{
+      const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),8000);
+      const res=await fetch(ep,{method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'data='+encodeURIComponent(q), signal:ctrl.signal});
+      clearTimeout(t);
+      if(!res.ok){ lastErr=new Error('HTTP '+res.status); continue; }
+      const j=await res.json();
+      return j.elements||[];
+    }catch(e){ lastErr=e; }
+  }
+  throw lastErr||new Error('overpass unavailable');
+}
+function parseOSM(elems,lat,lon){
+  const pts=[];
+  elems.forEach(el=>{
+    const cls=classifyOSM(el.tags); if(!cls) return;
+    let geom = el.type==='node' ? [{lat:el.lat,lon:el.lon}] : (el.geometry||[]);
+    if(!geom.length) return;
+    let best=null;
+    geom.forEach(g=>{ const d=hav(lat,lon,g.lat,g.lon); if(!best||d<best.d) best={d,g}; });
+    pts.push({src:'osm', name:(el.tags.name||el.tags['name:ja']||cls.label), cover:cls.cover, label:cls.label,
+      lat:best.g.lat, lon:best.g.lon,
+      dist:Math.round(best.d), dir:dir8(lat,lon,best.g.lat,best.g.lon)});
+  });
+  // 同名・同種の重複をまとめる(最短距離を採用)
+  const seen={};
+  pts.forEach(p=>{
+    const k=p.label+'|'+p.name;
+    if(!seen[k]||p.dist<seen[k].dist) seen[k]=p;
+  });
+  return Object.values(seen);
+}
+function nearMyPoints(lat,lon,r){
+  return myPoints.map(p=>({src:'my', name:p.name, cover:p.cover, depth:p.depth,
+      label:COVERS[p.cover]?COVERS[p.cover].label:'ポイント',
+      dist:Math.round(hav(lat,lon,p.lat,p.lon)), dir:dir8(lat,lon,p.lat,p.lon)}))
+    .filter(p=>p.dist<=r);
+}
+async function scanPoints(){
+  const pl=document.getElementById('pointList'), btn=document.getElementById('btnScan');
+  btn.disabled=true;
+  pl.innerHTML='<div class="empty">GPS取得中…</div>';
+  let pos;
+  try{ pos=await getGPS(); }
+  catch(e){ pl.innerHTML='<div class="empty">位置情報を取得できませんでした。端末の位置情報の許可を確認してください。</div>'; btn.disabled=false; return; }
+  const lat=pos.coords.latitude, lon=pos.coords.longitude, acc=Math.round(pos.coords.accuracy||0);
+  lastPos={lat,lon,acc};
+  // 最寄りの登録フィールドへ自動スイッチ(5km以内)
+  let best=null;
+  fields.forEach(f=>{ if(f.lat!=null){ const d=hav(lat,lon,f.lat,f.lon); if(d<5000&&(!best||d<best.d)) best={f,d}; }});
+  if(best && best.f.id!==state.fieldId){ state.fieldId=best.f.id; onFieldChange(); }
+  pl.innerHTML='<div class="empty">周辺の地物を検索中…</div>';
+  const r=state.radius;
+  // 一度取得した地図データは端末に30日キャッシュ(圏外・サーバー混雑でも動くように)
+  const ck='bfg_osm_'+lat.toFixed(3)+'_'+lon.toFixed(3)+'_'+r;
+  const cached=load(ck);
+  let osm=[], osmErr=false, fromCache=false;
+  if(cached && Date.now()-cached.ts < 30*86400e3){
+    osm=cached.pts; fromCache=true;
+  }else{
+    try{ osm=parseOSM(await overpass(lat,lon,r), lat, lon); save(ck,{ts:Date.now(),pts:osm}); }
+    catch(e){
+      if(cached){ osm=cached.pts; fromCache=true; } else osmErr=true;
+    }
+  }
+  osm=osm.map(p=>({...p, dist:Math.round(hav(lat,lon,p.lat,p.lon)), dir:dir8(lat,lon,p.lat,p.lon)}))
+         .filter(p=>p.dist<=r*1.25);
+  foundPoints = nearMyPoints(lat,lon,r).concat(osm);
+  foundPoints.sort((a,b)=> (a.src==='my')===(b.src==='my') ? a.dist-b.dist : (a.src==='my'?-1:1));
+  renderPointList(acc, osmErr, fromCache);
+  btn.disabled=false;
+}
+function renderPointList(acc, osmErr, fromCache){
+  const pl=document.getElementById('pointList');
+  let html=`<p class="hint" style="margin-top:10px">現在地(精度±${acc}m)から${state.radius}m以内 — ${foundPoints.length}件`
+    +`${fromCache?' ※保存済み地図データを使用':''}`
+    +`${osmErr?' ※地図サーバー混雑中(マイポイントのみ表示)。少し待って再検索してください':''}</p>`;
+  if(!foundPoints.length){
+    html+='<div class="empty">この範囲に地物・マイポイントが見つかりません。範囲を広げるか、下の「目の前のポイント」を手動で選んでガイドしてください。</div>';
+  }else{
+    foundPoints.forEach((p,i)=>{
+      html+=`<div class="pt-item ${p.src==='my'?'my':''}" onclick="applyPoint(${i})">
+        <span class="ico">${p.src==='my'?'★':(PT_ICON[p.cover]||'📍')}</span>
+        <div><div class="nm">${esc(p.name)}<span class="badge ${p.src==='my'?'my':''}">${p.src==='my'?'マイ':'地図'}</span></div>
+        <div class="meta">${esc(p.label)}${p.depth?` / ${DEPTH[p.depth]}`:''} → タップでガイド</div></div>
+        <div class="dist">${p.dir} ${p.dist}m</div></div>`;
+    });
+  }
+  pl.innerHTML=html;
+}
+function applyPoint(i){
+  const p=foundPoints[i]; if(!p) return;
+  state.cover=p.cover; chips('cCover',covOpts(),'cover');
+  if(p.depth){ state.depth=p.depth; chips('cDepth',DEPTH,'depth'); }
+  state.activePoint=p;
+  recommend(p);
+}
+async function saveMyPoint(){
+  let pos;
+  try{ pos=await getGPS(); }
+  catch(e){ alert('位置情報を取得できませんでした'); return; }
+  const name=prompt('ポイント名(例: 岬のブッシュ、実績の立木)');
+  if(!name) return;
+  myPoints.push({id:'p'+Math.random().toString(36).slice(2,9), name:name.trim(),
+    lat:pos.coords.latitude, lon:pos.coords.longitude,
+    cover:state.cover, depth:state.depth!=='unknown'?state.depth:null,
+    date:new Date().toISOString().slice(0,10)});
+  save('bfg_mypoints',myPoints);
+  alert('マイポイント「'+name.trim()+'」を登録しました');
+}
+function renderMyPoints(){
+  const el=document.getElementById('myPointList');
+  el.innerHTML = myPoints.length ? myPoints.map((p,i)=>
+    `<div class="lure-item"><div><div class="nm">★ ${esc(p.name)}</div>
+      <div class="meta">${COVERS[p.cover]?COVERS[p.cover].label:''}${p.depth?` / ${DEPTH[p.depth]}`:''} / ${p.date}</div></div>
+      <button onclick="delMyPoint(${i})">削除</button></div>`).join('')
+    : '<div class="empty">マイポイントが未登録です</div>';
+}
+function delMyPoint(i){ myPoints.splice(i,1); save('bfg_mypoints',myPoints); renderMyPoints(); }
+
 /* ============ フィールド管理 ============ */
 function renderFields(){
   const el=document.getElementById('fieldList');
@@ -510,6 +710,7 @@ function delField(i){
 /* ============ タックル管理 ============ */
 function renderTackle(){
   renderFields();
+  renderMyPoints();
   document.getElementById('sampleNote').style.display = isSample?'':'none';
   const ll=document.getElementById('lureList');
   if(!lures.length){ ll.innerHTML='<div class="empty">ルアーが未登録です</div>'; }
@@ -709,7 +910,7 @@ function groupReason(g,ctx){
   }
 }
 
-function recommend(){
+function recommend(point){
   const el=document.getElementById('results');
   if(!lures.length){
     el.innerHTML='<div class="card empty">ルアーが未登録です。「タックル」タブで追加してください。</div>';
@@ -740,7 +941,9 @@ function recommend(){
   // 戦略メモ
   const f=currentField();
   const cover=COVERS[ctx.cover];
-  let memo=`<b>${f?esc(f.name):FTYPE[ftype]} / ${BAND_LABEL[ctx.band]}</b>(水温${temp}℃・${tempSrc})。`;
+  let memo='';
+  if(point) memo+=`📍 <b>${esc(point.name)}</b>(${point.dir}${point.dist}m・${esc(point.label)})でのガイド。<br>`;
+  memo+=`<b>${f?esc(f.name):FTYPE[ftype]} / ${BAND_LABEL[ctx.band]}</b>(水温${temp}℃・${tempSrc})。`;
   memo+=`${SKY[ctx.sky]}・${WIND[ctx.wind]}・${TIME[ctx.time]}なら、`;
   if(ctx.band<=1) memo+='動きは最小限に。ゆっくり見せてリアクションかフォールで食わせる展開。';
   else if(ctx.band===2) memo+='シャローに差してくる魚を意識。カバー周りを丁寧に、テンポと食わせを使い分ける。';
@@ -773,7 +976,7 @@ function recommend(){
 
   // チャット相談用コピー
   const now=new Date();
-  const condText=`【バス釣り状況】${f?f.name:FTYPE[ftype]} ${now.getMonth()+1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} ${TIME[ctx.time]}/${SKY[ctx.sky]}/${WIND[ctx.wind]}/水温${temp}℃(${tempSrc})${lastWx?`/気温${lastWx.air}℃/風速${lastWx.wind}m/s/24h降水${lastWx.rain24}mm`:''}/${CLARITY[ctx.clarity]}/ポイント:${cover.label}/狙い:${DEPTH[ctx.depth]}。この状況で反応が出ません。次の一手を教えて。`;
+  const condText=`【バス釣り状況】${f?f.name:FTYPE[ftype]} ${now.getMonth()+1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} ${TIME[ctx.time]}/${SKY[ctx.sky]}/${WIND[ctx.wind]}/水温${temp}℃(${tempSrc})${lastWx?`/気温${lastWx.air}℃/風速${lastWx.wind}m/s/24h降水${lastWx.rain24}mm`:''}/${CLARITY[ctx.clarity]}/ポイント:${point?point.name+'('+cover.label+')':cover.label}/狙い:${DEPTH[ctx.depth]}。この状況で反応が出ません。次の一手を教えて。`;
   html+=`<button class="copybtn" onclick="copyCond(this)" data-t="${esc(condText)}">状況をコピーしてClaudeに相談する文面を作る</button>`;
 
   el.innerHTML=html;
