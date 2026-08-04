@@ -132,6 +132,10 @@ input[type=number],input[type=text],select{padding:10px 12px;border:1px solid va
   <div class="card">
     <span class="lbl">ポイントサーチ</span>
     <div class="chips" id="cRadius"></div>
+    <div id="testBox" style="display:none">
+      <p class="hint" style="margin-top:10px" id="testHint">🧪 テストモード中 — 地図をタップして疑似現在地を設定してから「探す」を押してください。</p>
+      <div id="testMap" style="height:280px;border-radius:10px;border:1px solid var(--line)"></div>
+    </div>
     <button class="btn2" id="btnScan" onclick="scanPoints()" style="width:100%;margin-top:10px">📍 現在地から有力ポイントを探す</button>
     <div id="pointList"></div>
     <button class="btn3" onclick="saveMyPoint()" style="width:100%;margin-top:10px">★ 今いる場所をマイポイント登録</button>
@@ -226,6 +230,11 @@ input[type=number],input[type=text],select{padding:10px 12px;border:1px solid va
     </div>
   </div>
   <div class="card">
+    <span class="lbl">設定</span>
+    <div class="chips" id="cTestMode"></div>
+    <p class="hint">テストモード: 現地にいなくても、フィールドの地図上でタップした位置を「疑似現在地」としてポイントサーチやマイポイント登録を試せます。</p>
+  </div>
+  <div class="card">
     <button class="copybtn" onclick="resetSample()">サンプルデータに戻す(タックルのみ)</button>
     <button class="copybtn" onclick="clearAll()" style="margin-top:8px">タックル全削除</button>
   </div>
@@ -295,11 +304,11 @@ const FTYPE = {pond:'野池', lake:'湖・ダム', river:'川'};
 const DEPTH = {shallow:'シャロー(〜1.5m)', mid:'ミドル(1.5〜3m)', deep:'ディープ(3m〜)', unknown:'不明'};
 
 const PRESET_FIELDS = [
- {id:'tsukui', name:'津久井湖', type:'lake', lat:35.596, lon:139.262},
- {id:'sagami', name:'相模湖', type:'lake', lat:35.608, lon:139.190},
- {id:'kameyama', name:'亀山湖', type:'lake', lat:35.246, lon:140.080},
- {id:'takataki', name:'高滝湖', type:'lake', lat:35.350, lon:140.130},
- {id:'mishima', name:'三島湖', type:'lake', lat:35.260, lon:140.050},
+ {id:'tsukui', name:'津久井湖', type:'lake', lat:35.5934, lon:139.2723},
+ {id:'sagami', name:'相模湖', type:'lake', lat:35.6107, lon:139.1878},
+ {id:'kameyama', name:'亀山湖', type:'lake', lat:35.2220, lon:140.0793},
+ {id:'takataki', name:'高滝湖', type:'lake', lat:35.3494, lon:140.1570},
+ {id:'mishima', name:'三島湖', type:'lake', lat:35.2122, lon:140.0344},
 ];
 
 /* ============ 状態 ============ */
@@ -344,9 +353,13 @@ function save(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} 
 let lures = load('bfg_lures') || SAMPLE_LURES.slice();
 let rods = load('bfg_rods') || SAMPLE_RODS.slice();
 let fields = load('bfg_fields') || PRESET_FIELDS.slice();
+// プリセット湖の座標修正を保存済みデータにも反映
+fields.forEach(f=>{ const p=PRESET_FIELDS.find(x=>x.id===f.id); if(p){ f.lat=p.lat; f.lon=p.lon; } });
 let myPoints = load('bfg_mypoints') || [];
 let foundPoints = [];
 let lastPos = null;
+let testMode = load('bfg_testmode')===1;
+let testPos = null, tMap = null, tMarker = null;
 let clarMemo = load('bfg_clar') || {};
 let isSample = load('bfg_custom') ? false : true;
 state.fieldId = load('bfg_lastfield') || (fields[0] ? fields[0].id : 'other');
@@ -383,6 +396,7 @@ function onFieldChange(){
   save('bfg_lastfield', state.fieldId);
   renderFieldChips();
   if(clarMemo[state.fieldId]){ state.clarity=clarMemo[state.fieldId]; chips('cClarity',CLARITY,'clarity'); }
+  if(testMode && tMap) initTestMap();
   fetchWx();
 }
 function buildForm(){
@@ -394,6 +408,12 @@ function buildForm(){
   renderFieldChips();
   chips('cRadius',RADII,'radius');
   chips('cCover',covOpts(),'cover'); chips('cDepth',DEPTH,'depth');
+  state.testMode = testMode?'on':'off';
+  chips('cTestMode',{off:'OFF',on:'ON(疑似現在地)'},'testMode',()=>{
+    testMode = state.testMode==='on';
+    save('bfg_testmode', testMode?1:0);
+    updateTestUI();
+  });
   const sel=document.getElementById('fLureCat');
   sel.innerHTML = CATS.map(c=>`<option value="${c.id}">${c.label}</option>`).join('');
 }
@@ -404,6 +424,7 @@ function showTab(t){
   document.getElementById('tabTackle').classList.toggle('on',t==='tackle');
   document.getElementById('goBar').style.display = t==='guide'?'':'none';
   if(t==='tackle') renderTackle();
+  if(t==='guide' && testMode && tMap) setTimeout(()=>tMap.invalidateSize(),150);
 }
 
 /* ============ 日時の自動設定 ============ */
@@ -535,6 +556,50 @@ function getGPS(){
     navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:12000,maximumAge:30000});
   });
 }
+/* テストモード時は地図でタップした疑似現在地を返す */
+function getPos(){
+  if(testMode){
+    if(testPos) return Promise.resolve({coords:{latitude:testPos.lat, longitude:testPos.lon, accuracy:0}, isTest:true});
+    return Promise.reject(new Error('notestpos'));
+  }
+  return getGPS();
+}
+
+/* ============ テストモード(疑似現在地マップ) ============ */
+function ensureLeaflet(cb){
+  if(window.L){ cb(); return; }
+  const css=document.createElement('link');
+  css.rel='stylesheet'; css.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+  document.head.appendChild(css);
+  const s=document.createElement('script');
+  s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+  s.onload=cb;
+  s.onerror=()=>{ document.getElementById('testHint').textContent='⚠ 地図ライブラリを読み込めませんでした。ネット接続を確認してください。'; };
+  document.head.appendChild(s);
+}
+function initTestMap(){
+  const f=currentField();
+  const c=[(f&&f.lat!=null)?f.lat:35.68, (f&&f.lon!=null)?f.lon:139.76];
+  if(!tMap){
+    tMap=L.map('testMap').setView(c,15);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      {maxZoom:19, attribution:'&copy; OpenStreetMap'}).addTo(tMap);
+    tMap.on('click',e=>{
+      testPos={lat:e.latlng.lat, lon:e.latlng.lng};
+      if(tMarker) tMarker.setLatLng(e.latlng); else tMarker=L.marker(e.latlng).addTo(tMap);
+      document.getElementById('testHint').textContent=`🧪 疑似現在地: ${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)} — 「探す」を押してください`;
+    });
+    setTimeout(()=>tMap.invalidateSize(),150);
+  }else{
+    tMap.setView(c,15);
+    setTimeout(()=>tMap.invalidateSize(),150);
+  }
+}
+function updateTestUI(){
+  document.getElementById('testBox').style.display = testMode?'':'none';
+  document.getElementById('btnScan').textContent = testMode?'🧪 選択位置から有力ポイントを探す':'📍 現在地から有力ポイントを探す';
+  if(testMode) ensureLeaflet(initTestMap);
+}
 function classifyOSM(tags){
   if(!tags) return null;
   if(tags.waterway==='dam'||tags.man_made==='dam') return {cover:'rock',label:'ダムサイト(岩盤)'};
@@ -602,8 +667,13 @@ async function scanPoints(){
   btn.disabled=true;
   pl.innerHTML='<div class="empty">GPS取得中…</div>';
   let pos;
-  try{ pos=await getGPS(); }
-  catch(e){ pl.innerHTML='<div class="empty">位置情報を取得できませんでした。端末の位置情報の許可を確認してください。</div>'; btn.disabled=false; return; }
+  try{ pos=await getPos(); }
+  catch(e){
+    pl.innerHTML = testMode
+      ? '<div class="empty">先に地図をタップして疑似現在地を設定してください。</div>'
+      : '<div class="empty">位置情報を取得できませんでした。端末の位置情報の許可を確認してください。</div>';
+    btn.disabled=false; return;
+  }
   const lat=pos.coords.latitude, lon=pos.coords.longitude, acc=Math.round(pos.coords.accuracy||0);
   lastPos={lat,lon,acc};
   // 最寄りの登録フィールドへ自動スイッチ(5km以内)
@@ -633,7 +703,7 @@ async function scanPoints(){
 }
 function renderPointList(acc, osmErr, fromCache){
   const pl=document.getElementById('pointList');
-  let html=`<p class="hint" style="margin-top:10px">現在地(精度±${acc}m)から${state.radius}m以内 — ${foundPoints.length}件`
+  let html=`<p class="hint" style="margin-top:10px">${testMode?'疑似現在地(テスト)':'現在地(精度±'+acc+'m)'}から${state.radius}m以内 — ${foundPoints.length}件`
     +`${fromCache?' ※保存済み地図データを使用':''}`
     +`${osmErr?' ※地図サーバー混雑中(マイポイントのみ表示)。少し待って再検索してください':''}</p>`;
   if(!foundPoints.length){
@@ -658,8 +728,8 @@ function applyPoint(i){
 }
 async function saveMyPoint(){
   let pos;
-  try{ pos=await getGPS(); }
-  catch(e){ alert('位置情報を取得できませんでした'); return; }
+  try{ pos=await getPos(); }
+  catch(e){ alert(testMode?'先に地図をタップして疑似現在地を設定してください':'位置情報を取得できませんでした'); return; }
   const name=prompt('ポイント名(例: 岬のブッシュ、実績の立木)');
   if(!name) return;
   myPoints.push({id:'p'+Math.random().toString(36).slice(2,9), name:name.trim(),
@@ -991,5 +1061,6 @@ function copyCond(btn){
 }
 
 buildForm();
+updateTestUI();
 fetchWx();
 </script>
