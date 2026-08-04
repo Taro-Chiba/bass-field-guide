@@ -291,6 +291,8 @@ const COVERS = {
  weed:{label:'ウィード', where:'ウィードエッジと切れ目。面より「穴・境目」を狙う'},
  overhang:{label:'オーバーハング', where:'枝の奥のシェードへスキップ気味に。奥に入るほど良い'},
  inflow:{label:'流れ込み', where:'流れの筋と両脇のヨレ。酸素と餌が集まる一等地'},
+ cape:{label:'岬', where:'岬の先端から両サイドのブレイクを扇状に。風と流れが当たる側を優先'},
+ wand:{label:'ワンド', where:'ワンドの入口の角(回遊の通り道)と最奥のシャロー。奥ほど丁寧に'},
  pier:{label:'桟橋', where:'支柱まわりと最奥のシェードへスキッピングで送り込む'},
  open:{label:'オープン', where:'沖のブレイク・地形変化を扇状に広くサーチ。回遊待ち'},
  none:{label:'特になし', where:'岸際の変化(影・角・何かある場所)を撃ちながらランガン'},
@@ -536,7 +538,7 @@ const OVERPASS_EP=[
  'https://overpass.private.coffee/api/interpreter',
  'https://overpass.kumi.systems/api/interpreter',
 ];
-const PT_ICON={inflow:'💧',bridge:'🌉',pier:'⚓',reed:'🌾',rock:'🪨',overhang:'🌳',wood:'🪵',weed:'🌿',open:'🌊',none:'📍'};
+const PT_ICON={inflow:'💧',bridge:'🌉',pier:'⚓',reed:'🌾',rock:'🪨',overhang:'🌳',wood:'🪵',weed:'🌿',open:'🌊',none:'📍',cape:'⛰️',wand:'🌙'};
 
 function hav(lat1,lon1,lat2,lon2){
   const R=6371000, r=Math.PI/180;
@@ -612,19 +614,11 @@ function classifyOSM(tags){
   if(tags.natural==='tree_row') return {cover:'overhang',label:'オーバーハング(並木)'};
   return null;
 }
-async function overpass(lat,lon,r){
-  const q=`[out:json][timeout:10];(`
-    +`way(around:${r},${lat},${lon})[waterway~"^(stream|river|ditch|drain|canal|dam)$"];`
-    +`way(around:${r},${lat},${lon})[bridge];`
-    +`way(around:${r},${lat},${lon})[man_made~"^(pier|breakwater|groyne|dam)$"];`
-    +`node(around:${r},${lat},${lon})[man_made=pier];`
-    +`way(around:${r},${lat},${lon})[natural~"^(wetland|reed|scrub|bare_rock|cliff|rock|tree_row)$"];`
-    +`way(around:${r},${lat},${lon})[leisure=slipway];`
-    +`);out geom qt 40;`;
+async function overpassQ(q,tmo){
   let lastErr=null;
   for(const ep of OVERPASS_EP){
     try{
-      const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),8000);
+      const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),tmo||8000);
       const res=await fetch(ep,{method:'POST',
         headers:{'Content-Type':'application/x-www-form-urlencoded'},
         body:'data='+encodeURIComponent(q), signal:ctrl.signal});
@@ -635,6 +629,152 @@ async function overpass(lat,lon,r){
     }catch(e){ lastErr=e; }
   }
   throw lastErr||new Error('overpass unavailable');
+}
+async function overpass(lat,lon,r){
+  const q=`[out:json][timeout:10];(`
+    +`way(around:${r},${lat},${lon})[waterway~"^(stream|river|ditch|drain|canal|dam)$"];`
+    +`way(around:${r},${lat},${lon})[bridge];`
+    +`way(around:${r},${lat},${lon})[man_made~"^(pier|breakwater|groyne|dam)$"];`
+    +`node(around:${r},${lat},${lon})[man_made=pier];`
+    +`way(around:${r},${lat},${lon})[natural~"^(wetland|reed|scrub|bare_rock|cliff|rock|tree_row)$"];`
+    +`way(around:${r},${lat},${lon})[leisure=slipway];`
+    +`);out geom qt 40;`;
+  return overpassQ(q);
+}
+
+/* ============ 湖岸線の地形解析(岬・ワンド・河口) ============ */
+function ringEq(a,b){ return Math.abs(a.lat-b.lat)<1e-7 && Math.abs(a.lon-b.lon)<1e-7; }
+function assembleRings(segs){
+  segs=segs.filter(s=>s&&s.length>1).map(s=>s.slice());
+  const rings=[];
+  while(segs.length){
+    let ring=segs.pop(), changed=true;
+    while(changed && !ringEq(ring[0],ring[ring.length-1])){
+      changed=false;
+      for(let i=0;i<segs.length;i++){
+        const s=segs[i];
+        if(ringEq(ring[ring.length-1],s[0])){ ring=ring.concat(s.slice(1)); }
+        else if(ringEq(ring[ring.length-1],s[s.length-1])){ ring=ring.concat(s.slice(0,-1).reverse()); }
+        else if(ringEq(ring[0],s[s.length-1])){ ring=s.slice(0,-1).concat(ring); }
+        else if(ringEq(ring[0],s[0])){ ring=s.slice(1).reverse().concat(ring); }
+        else continue;
+        segs.splice(i,1); changed=true; break;
+      }
+    }
+    if(ring.length>10 && ringEq(ring[0],ring[ring.length-1])) rings.push(ring);
+  }
+  return rings;
+}
+function pip(pt,ring){
+  let inside=false;
+  for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+    const yi=ring[i].lat, xi=ring[i].lon, yj=ring[j].lat, xj=ring[j].lon;
+    if(((yi>pt.lat)!==(yj>pt.lat)) && (pt.lon < (xj-xi)*(pt.lat-yi)/(yj-yi)+xi)) inside=!inside;
+  }
+  return inside;
+}
+function computeTerrain(ring, waterways, lat0, lon0){
+  const cosL=Math.cos(lat0*Math.PI/180);
+  const mx=p=>({x:(p.lon-lon0)*111320*cosL, y:(p.lat-lat0)*110540});
+  const P=ring.map(mx);
+  const n=P.length-1;
+  const cum=[0];
+  for(let i=1;i<=n;i++) cum[i]=cum[i-1]+Math.hypot(P[i].x-P[i-1].x,P[i].y-P[i-1].y);
+  const total=cum[n];
+  if(total<600) return [];
+  const H=80; // 岸沿い前後80mの窓で曲がりを評価
+  const findAt=s=>{
+    s=((s%total)+total)%total;
+    let lo=0,hi=n;
+    while(lo<hi){ const mid=(lo+hi)>>1; if(cum[mid]<s) lo=mid+1; else hi=mid; }
+    return P[Math.min(lo,n)];
+  };
+  const cands=[];
+  for(let i=0;i<n;i++){
+    const V=P[i], A=findAt(cum[i]-H), B=findAt(cum[i]+H);
+    const chord=Math.hypot(B.x-A.x,B.y-A.y);
+    if(chord<1) continue;
+    const sinu=Math.min(2*H/chord,6);
+    const tt=((V.x-A.x)*(B.x-A.x)+(V.y-A.y)*(B.y-A.y))/(chord*chord);
+    const dev=Math.hypot(V.x-(A.x+tt*(B.x-A.x)), V.y-(A.y+tt*(B.y-A.y)));
+    if(sinu<1.4 && dev<30) continue;
+    const M={lat:lat0+((A.y+B.y)/2)/110540, lon:lon0+((A.x+B.x)/2)/(111320*cosL)};
+    const isWand=pip(M,ring); // 弦の中点が水中=ワンド、陸=岬
+    cands.push({arc:cum[i], s:sinu+dev/50, cover:isWand?'wand':'cape', lat:ring[i].lat, lon:ring[i].lon});
+  }
+  cands.sort((a,b)=>b.s-a.s);
+  const kept=[];
+  for(const c of cands){
+    if(kept.some(k=>Math.min(Math.abs(k.arc-c.arc), total-Math.abs(k.arc-c.arc))<120)) continue;
+    kept.push(c);
+    if(kept.length>=150) break;
+  }
+  const pts=kept.map(c=>({src:'terrain', cover:c.cover,
+    label:c.cover==='wand'?'ワンド':'岬', name:c.cover==='wand'?'ワンド':'岬', lat:c.lat, lon:c.lon}));
+  // 河口検出: 沢・川の流路が岸線に最接近する点(45m以内)
+  const cell=50, grid={};
+  P.forEach((p,idx)=>{ const k=Math.floor(p.x/cell)+'_'+Math.floor(p.y/cell); (grid[k]=grid[k]||[]).push(idx); });
+  const nearRing=pm=>{
+    const gx=Math.floor(pm.x/cell), gy=Math.floor(pm.y/cell); let best=1e9;
+    for(let dx=-1;dx<=1;dx++) for(let dy=-1;dy<=1;dy++){
+      const a=grid[(gx+dx)+'_'+(gy+dy)];
+      if(a) a.forEach(idx=>{ const d=Math.hypot(P[idx].x-pm.x,P[idx].y-pm.y); if(d<best)best=d; });
+    }
+    return best;
+  };
+  const mouths=[];
+  (waterways||[]).forEach(w=>{
+    let best=null;
+    (w.geometry||[]).forEach(p=>{
+      const d=nearRing(mx(p));
+      if(d<45 && (!best||d<best.d)) best={d,p};
+    });
+    if(best){
+      const nm=(w.tags&&(w.tags.name||w.tags['name:ja']));
+      mouths.push({src:'terrain', cover:'inflow', label:'流れ込み(河口)',
+        name:nm?nm+'の河口':'流れ込み(河口)', lat:best.p.lat, lon:best.p.lon});
+    }
+  });
+  // 近接する河口の重複をまとめる(60m)
+  const mkept=[];
+  mouths.forEach(m=>{ if(!mkept.some(k=>hav(k.lat,k.lon,m.lat,m.lon)<60)) mkept.push(m); });
+  return pts.concat(mkept);
+}
+let terrainFailAt=0;
+async function ensureTerrain(f){
+  if(!f || f.lat==null) return [];
+  const key='bfg_terrain_'+f.id;
+  const c=load(key);
+  if(c && Date.now()-c.ts < 90*86400e3) return c.pts;
+  if(Date.now()-terrainFailAt < 10*60e3) return c?c.pts:[]; // 直近失敗時は10分再試行しない
+  try{
+    // 1) 湖面ポリゴン取得
+    const q1=`[out:json][timeout:25];(way(around:1500,${f.lat},${f.lon})[natural=water];relation(around:1500,${f.lat},${f.lon})[natural=water];);out geom qt;`;
+    const els=await overpassQ(q1,20000);
+    const segs=[];
+    els.forEach(el=>{
+      if(el.type==='way' && el.geometry) segs.push(el.geometry);
+      if(el.type==='relation' && el.members) el.members.forEach(m=>{
+        if(m.role==='outer' && m.geometry) segs.push(m.geometry);
+      });
+    });
+    const rings=assembleRings(segs);
+    if(!rings.length) throw new Error('no water polygon');
+    let ring=rings.find(rg=>pip({lat:f.lat,lon:f.lon},rg));
+    if(!ring) ring=rings.reduce((a,b)=>a.length>b.length?a:b);
+    // 2) 湖のbbox内の沢・川を取得
+    let s=90,w=190,n=-90,e=-190;
+    ring.forEach(p=>{ s=Math.min(s,p.lat); n=Math.max(n,p.lat); w=Math.min(w,p.lon); e=Math.max(e,p.lon); });
+    const q2=`[out:json][timeout:25];way[waterway~"^(stream|river|ditch|drain|canal)$"](${s-0.002},${w-0.002},${n+0.002},${e+0.002});out geom qt 300;`;
+    let ww=[];
+    try{ ww=await overpassQ(q2,20000); }catch(err){}
+    const pts=computeTerrain(ring, ww, f.lat, f.lon);
+    save(key,{ts:Date.now(), pts});
+    return pts;
+  }catch(err){
+    terrainFailAt=Date.now();
+    return c?c.pts:[];
+  }
 }
 function parseOSM(elems,lat,lon){
   const pts=[];
@@ -658,7 +798,7 @@ function parseOSM(elems,lat,lon){
 }
 function nearMyPoints(lat,lon,r){
   return myPoints.map(p=>({src:'my', name:p.name, cover:p.cover, depth:p.depth,
-      label:COVERS[p.cover]?COVERS[p.cover].label:'ポイント',
+      label:COVERS[p.cover]?COVERS[p.cover].label:'ポイント', lat:p.lat, lon:p.lon,
       dist:Math.round(hav(lat,lon,p.lat,p.lon)), dir:dir8(lat,lon,p.lat,p.lon)}))
     .filter(p=>p.dist<=r);
 }
@@ -680,6 +820,10 @@ async function scanPoints(){
   let best=null;
   fields.forEach(f=>{ if(f.lat!=null){ const d=hav(lat,lon,f.lat,f.lon); if(d<5000&&(!best||d<best.d)) best={f,d}; }});
   if(best && best.f.id!==state.fieldId){ state.fieldId=best.f.id; onFieldChange(); }
+  // 湖岸線の地形解析(初回のみ取得、以後は90日キャッシュ)
+  pl.innerHTML='<div class="empty">湖岸線の地形データを確認中…(初回は10秒ほどかかります)</div>';
+  let terrain=[];
+  try{ terrain=await ensureTerrain(currentField()); }catch(e){}
   pl.innerHTML='<div class="empty">周辺の地物を検索中…</div>';
   const r=state.radius;
   // 一度取得した地図データは端末に30日キャッシュ(圏外・サーバー混雑でも動くように)
@@ -696,10 +840,32 @@ async function scanPoints(){
   }
   osm=osm.map(p=>({...p, dist:Math.round(hav(lat,lon,p.lat,p.lon)), dir:dir8(lat,lon,p.lat,p.lon)}))
          .filter(p=>p.dist<=r*1.25);
-  foundPoints = nearMyPoints(lat,lon,r).concat(osm);
+  const terr=terrain.map(p=>({...p, dist:Math.round(hav(lat,lon,p.lat,p.lon)), dir:dir8(lat,lon,p.lat,p.lon)}))
+         .filter(p=>p.dist<=r*1.25);
+  // マージ: マイ→地形→地物。流れ込みは地形解析の「河口」を優先し60m以内の重複を除去
+  let merged = nearMyPoints(lat,lon,r).concat(terr, osm);
+  const inflSeen=[];
+  merged = merged.filter(p=>{
+    if(p.cover!=='inflow') return true;
+    if(inflSeen.some(q=>hav(q.lat,q.lon,p.lat,p.lon)<60)) return false;
+    inflSeen.push(p); return true;
+  });
+  foundPoints = merged;
   foundPoints.sort((a,b)=> (a.src==='my')===(b.src==='my') ? a.dist-b.dist : (a.src==='my'?-1:1));
   renderPointList(acc, osmErr, fromCache);
+  plotPointsOnMap();
   btn.disabled=false;
+}
+/* テストモードの地図に検出ポイントを表示 */
+let ptLayer=null;
+function plotPointsOnMap(){
+  if(!(testMode && tMap && window.L)) return;
+  if(ptLayer){ ptLayer.remove(); ptLayer=null; }
+  const marks=foundPoints.filter(p=>p.lat!=null).map(p=>
+    L.circleMarker([p.lat,p.lon],{radius:7, weight:2, fillOpacity:.4,
+      color:p.src==='my'?'#E4572E':(p.src==='terrain'?'#2E7D5B':'#3388ff')})
+    .bindTooltip(`${p.name}(${p.label})`));
+  if(marks.length){ ptLayer=L.layerGroup(marks); ptLayer.addTo(tMap); }
 }
 function renderPointList(acc, osmErr, fromCache){
   const pl=document.getElementById('pointList');
@@ -712,7 +878,7 @@ function renderPointList(acc, osmErr, fromCache){
     foundPoints.forEach((p,i)=>{
       html+=`<div class="pt-item ${p.src==='my'?'my':''}" onclick="applyPoint(${i})">
         <span class="ico">${p.src==='my'?'★':(PT_ICON[p.cover]||'📍')}</span>
-        <div><div class="nm">${esc(p.name)}<span class="badge ${p.src==='my'?'my':''}">${p.src==='my'?'マイ':'地図'}</span></div>
+        <div><div class="nm">${esc(p.name)}<span class="badge ${p.src==='my'?'my':''}">${p.src==='my'?'マイ':(p.src==='terrain'?'地形':'地図')}</span></div>
         <div class="meta">${esc(p.label)}${p.depth?` / ${DEPTH[p.depth]}`:''} → タップでガイド</div></div>
         <div class="dist">${p.dir} ${p.dist}m</div></div>`;
     });
@@ -896,6 +1062,8 @@ function scoreAll(ctx){
   if(cv==='rock'){ add(['jig'],2); add(['crank_sr','crank_mr','crank_dr','texas','vib','metal'],1); }
   if(cv==='bridge'){ add(['vib','metal','downshot','wacky','jerkbait','swim'],1); }
   if(cv==='inflow'){ add(['nosinker','shad','jerkbait','spinnerbait','pencil','jighead'],1); }
+  if(cv==='cape'){ add(['spinnerbait','vib','metal','crank_mr','crank_dr','jighead','swim','downshot','jig'],1); add(['frog'],-1); }
+  if(cv==='wand'){ add(['frog','nosinker','pencil','buzz','neko','wacky','smallrubber'],1); add(['metal','crank_dr'],-2); }
   if(cv==='open'){ add(['vib','metal','spinnerbait','crank_mr','crank_dr','swim','jighead'],1); add(['frog'],-2); add(['smallrubber'],-1); }
   if(cv==='pier'){ add(['smallrubber','wacky'],2); add(['downshot','neko','nosinker','frog'],1); add(['crank_mr','crank_dr'],-1); }
 
