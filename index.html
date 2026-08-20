@@ -137,6 +137,8 @@ details.fallback[open]>summary::before{content:'▾ '}
   <div class="card">
     <span class="lbl">フィールド</span>
     <div class="chips" id="cFieldSel"></div>
+    <span class="lbl">スタイル</span>
+    <div class="chips" id="cStyle"></div>
     <div id="genericField" style="display:none">
       <span class="lbl">フィールドタイプ</span>
       <div class="chips" id="cFieldType"></div>
@@ -314,18 +316,30 @@ const BAND_LABEL = ['真冬パターン','早春・越冬明け','スポーニ�
 const MONTH_TEMP = [6,7,10,14,18,22,26,28,26,20,14,9]; // 1-12月の目安水温
 
 const COVERS = {
- reed:{label:'アシ・ブッシュ', where:'アシ際ギリギリ、風や流れが当たる面を優先。切れ目・ポケットが一級スポット'},
- wood:{label:'杭・立木', where:'杭の際、影になる側にタイト。数本まとめてテンポよく撃つ'},
- rock:{label:'岩・リップラップ', where:'岩のブレイク沿いを斜めに通す。時々ボトムに当てるのが◎'},
- bridge:{label:'橋脚', where:'橋脚の明暗と流れのヨレ。アップから通して足元まで気を抜かず'},
- weed:{label:'ウィード', where:'ウィードエッジと切れ目。面より「穴・境目」を狙う'},
- overhang:{label:'オーバーハング', where:'枝の奥のシェードへスキップ気味に。奥に入るほど良い'},
- inflow:{label:'流れ込み', where:'流れの筋と両脇のヨレ。酸素と餌が集まる一等地'},
- cape:{label:'岬', where:'岬の先端から両サイドのブレイクを扇状に。風と流れが当たる側を優先'},
- wand:{label:'ワンド', where:'ワンドの入口の角(回遊の通り道)と最奥のシャロー。奥ほど丁寧に'},
- pier:{label:'桟橋', where:'支柱まわりと最奥のシェードへスキッピングで送り込む'},
- open:{label:'オープン', where:'沖のブレイク・地形変化を扇状に広くサーチ。回遊待ち'},
- none:{label:'特になし', where:'岸際の変化(影・角・何かある場所)を撃ちながらランガン'},
+ reed:{label:'アシ・ブッシュ', where:'アシ際ギリギリ、風や流れが当たる面を優先。切れ目・ポケットが一級スポット',
+   whereB:'アシ帯から1キャスト分離して平行に流し、際を撃ちながら切れ目・ポケットで船を止めて粘る'},
+ wood:{label:'杭・立木', where:'杭の際、影になる側にタイト。数本まとめてテンポよく撃つ',
+   whereB:'杭列の沖に船を置き影側へキャスト。1本ずつ角度を変えて全方向から撃てるのがボートの強み'},
+ rock:{label:'岩・リップラップ', where:'岩のブレイク沿いを斜めに通す。時々ボトムに当てるのが◎',
+   whereB:'ブレイクの沖に船を置き、岸に向かってキャストして深→浅へ引く。岩に当てて外れた瞬間が食わせ所'},
+ bridge:{label:'橋脚', where:'橋脚の明暗と流れのヨレ。アップから通して足元まで気を抜かず',
+   whereB:'橋脚に寄せすぎない船位から明暗の境へアップクロス。角度を変えて四方から通す'},
+ weed:{label:'ウィード', where:'ウィードエッジと切れ目。面より「穴・境目」を狙う',
+   whereB:'エッジの沖側に船を置きエッジと平行に引く。切れ目・穴は真上から落とすのも有効'},
+ overhang:{label:'オーバーハング', where:'枝の奥のシェードへスキップ気味に。奥に入るほど良い',
+   whereB:'沖から枝の奥へスキッピングで送り込み、岸と平行に流しながらテンポよく撃つ'},
+ inflow:{label:'流れ込み', where:'流れの筋と両脇のヨレ。酸素と餌が集まる一等地',
+   whereB:'流れ込みの沖に船を止め、両脇のヨレから先に撃って最後に流心へ'},
+ cape:{label:'岬', where:'岬の先端から両サイドのブレイクを扇状に。風と流れが当たる側を優先',
+   whereB:'岬の沖に船を置き、先端のブレイクを深い側から浅い側へ通す。両サイドも扇状に'},
+ wand:{label:'ワンド', where:'ワンドの入口の角(回遊の通り道)と最奥のシャロー。奥ほど丁寧に',
+   whereB:'入口の沖から最奥へ向けてロングキャスト。奥を撃つなら船を静かに入れ、岸際を平行に引く'},
+ pier:{label:'桟橋', where:'支柱まわりと最奥のシェードへスキッピングで送り込む',
+   whereB:'沖側から支柱の間へスキッピング。船位を変えて奥のシェードに角度を作る'},
+ open:{label:'オープン', where:'沖のブレイク・地形変化を扇状に広くサーチ。回遊待ち',
+   whereB:'ブレイク・ハンプの上を風上から流し、扇状にキャストして広くサーチ'},
+ none:{label:'特になし', where:'岸際の変化(影・角・何かある場所)を撃ちながらランガン',
+   whereB:'岸と平行に流しながらバンク際1m以内へタイトに撃っていく'},
 };
 
 const SKY = {sunny:'快晴', fine:'晴れ', cloud:'曇り', rain:'雨', afterrain:'雨後(増水)'};
@@ -348,9 +362,10 @@ const state = {
   month:new Date().getMonth()+1, time:'day', sky:'fine', wind:'breeze',
   clarity:'stain', cover:'none', depth:'unknown',
   fieldId:null, fieldType:'lake', autoTemp:null,
-  radius:100, activePoint:null,
+  radius:100, activePoint:null, style:'shore',
 };
 const RADII = {100:'100m', 300:'300m', 500:'500m'};
+const STYLE = {shore:'オカッパリ', boat:'ボート'};
 
 const SAMPLE_LURES = [
  {name:'ペンシルベイト 95', cat:'pencil', color:'natural'},
@@ -438,6 +453,8 @@ function buildForm(){
   chips('cClarity',CLARITY,'clarity');
   chips('cFieldType',FTYPE,'fieldType');
   renderFieldChips();
+  state.style = load('bfg_style')==='boat' ? 'boat' : 'shore';
+  chips('cStyle',STYLE,'style',()=>save('bfg_style',state.style));
   chips('cRadius',RADII,'radius');
   chips('cCover',covOpts(),'cover'); chips('cDepth',DEPTH,'depth');
   state.testMode = testMode?'on':'off';
@@ -955,7 +972,9 @@ const AI_SYSTEM = 'あなたは日本のバスフィッシングのプロガイ�
  +'回答は日本語で、現場で今すぐ実行できる具体性を最優先にしてください: どこに投げるか(立ち位置と狙う地形)、何を使うか、レンジ、リトリーブ速度やアクション、カラー。'
  +'ルアーは必ずユーザーの手持ちタックル一覧の中からだけ選ぶこと。'
  +'アプリのルールベース推奨が添えられている場合は、賛成なら一言で補強し、別の手が良いと思えば理由を添えて代案を出すこと。'
- +'季節・水温・気象・ポイント地形の根拠を一言添える。全体は400字程度で簡潔に。';
+ +'季節・水温・気象・ポイント地形の根拠を一言添える。全体は400字程度で簡潔に。'
+ +'状況の「スタイル」がオカッパリの場合は、岸に立って岸際から沖へ探る前提で立ち位置とキャスト方向を指示する。'
+ +'ボートの場合は、船を沖に置き岸・カバー・地形に向かってアプローチする前提で、船位や流し方(風・エレキの使い方)も含めて指示する。';
 
 function tackleText(){
   const colorL={natural:'ナチュラル',appeal:'アピール',dark:'ダーク'};
@@ -1349,7 +1368,7 @@ function recommend(point){
         <div><div class="name">${esc(lure.name)}</div><div class="cat">${cat.label}</div></div></div>
       <div class="fit"><div class="bar"><i style="width:${pct}%"></i></div><span>適合度 ${pct}</span></div>
       <dl class="kv">
-        <dt>どこに</dt><dd>${cover.where}</dd>
+        <dt>どこに</dt><dd>${ctx.style==='boat'&&cover.whereB?cover.whereB:cover.where}</dd>
         <dt>レンジ</dt><dd>${rangeText(p.id,ctx)}</dd>
         <dt>動かし方</dt><dd>${speedText(p.id,ctx)}</dd>
         <dt>カラー</dt><dd>${color.label}</dd>
@@ -1361,7 +1380,7 @@ function recommend(point){
 
   // 状況サマリー(Claude相談・コピー共用)
   const now=new Date();
-  const condCore=`【バス釣り状況】${f?f.name:FTYPE[ftype]} ${now.getMonth()+1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} ${TIME[ctx.time]}/${SKY[ctx.sky]}/${WIND[ctx.wind]}/水温${temp}℃(${tempSrc})${lastWx?`/気温${lastWx.air}℃/風速${lastWx.wind}m/s/24h降水${lastWx.rain24}mm`:''}/${CLARITY[ctx.clarity]}/ポイント:${point?point.name+'('+cover.label+')':cover.label}/狙い:${DEPTH[ctx.depth]}`;
+  const condCore=`【バス釣り状況】${f?f.name:FTYPE[ftype]}(${STYLE[ctx.style]}) ${now.getMonth()+1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} ${TIME[ctx.time]}/${SKY[ctx.sky]}/${WIND[ctx.wind]}/水温${temp}℃(${tempSrc})${lastWx?`/気温${lastWx.air}℃/風速${lastWx.wind}m/s/24h降水${lastWx.rain24}mm`:''}/${CLARITY[ctx.clarity]}/ポイント:${point?point.name+'('+cover.label+')':cover.label}/狙い:${DEPTH[ctx.depth]}`;
 
   // 結果: 戦略メモ → Claudeの見解(主役) → 定石ローテーション(折りたたみ・保険)
   let html=`<div class="strategy">${memo}</div>`;
