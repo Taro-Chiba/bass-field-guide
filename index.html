@@ -129,7 +129,7 @@ details.fallback[open]>summary::before{content:'▾ '}
 
 <nav class="tabs">
   <button id="tabGuide" class="on" onclick="showTab('guide')">ガイド</button>
-  <button id="tabTackle" onclick="showTab('tackle')">タックル</button>
+  <button id="tabTackle" onclick="showTab('tackle')">管理</button>
 </nav>
 
 <!-- ================= GUIDE ================= -->
@@ -215,42 +215,6 @@ details.fallback[open]>summary::before{content:'▾ '}
     <p class="hint">登録は「ガイド」タブの「★ 今いる場所をマイポイント登録」から。</p>
   </div>
   <div class="card">
-    <span class="lbl">ルアーボックス</span>
-    <p class="subtle" id="sampleNote">※現在はサンプルデータです。自分の手持ちに入れ替えてください。</p>
-    <div id="lureList"></div>
-    <div class="addform">
-      <input type="text" id="fLureName" placeholder="ルアー名(例: OSP ドライブスティック 4.5)">
-      <div class="row2">
-        <select id="fLureCat"></select>
-        <select id="fLureColor">
-          <option value="natural">ナチュラル系カラー</option>
-          <option value="appeal">アピール系カラー</option>
-          <option value="dark">ブラック/ダーク系</option>
-        </select>
-      </div>
-      <button class="btn2" onclick="addLure()">ルアーを追加</button>
-    </div>
-  </div>
-  <div class="card">
-    <span class="lbl">ロッド</span>
-    <div id="rodList"></div>
-    <div class="addform">
-      <input type="text" id="fRodName" placeholder="ロッド名(例: ポイズンアドレナ 264UL)">
-      <div class="row2">
-        <select id="fRodType">
-          <option value="spin">スピニング</option>
-          <option value="bait">ベイト</option>
-          <option value="bf">ベイトフィネス</option>
-        </select>
-        <select id="fRodPower">
-          <option>UL</option><option>L</option><option selected>ML</option>
-          <option>M</option><option>MH</option><option>H</option><option>XH</option>
-        </select>
-      </div>
-      <button class="btn2" onclick="addRod()">ロッドを追加</button>
-    </div>
-  </div>
-  <div class="card">
     <span class="lbl">設定</span>
     <div class="chips" id="cTestMode"></div>
     <p class="hint">テストモード: 現地にいなくても、フィールドの地図上でタップした位置を「疑似現在地」としてポイントサーチやマイポイント登録を試せます。</p>
@@ -265,10 +229,6 @@ details.fallback[open]>summary::before{content:'▾ '}
       <button class="btn2" onclick="saveAiSettings()">保存して接続テスト</button>
       <p class="hint" id="aiTestResult">キーはこの端末のブラウザ内にのみ保存され、Anthropic社のAPI以外には送信されません。</p>
     </div>
-  </div>
-  <div class="card">
-    <button class="copybtn" onclick="resetSample()">サンプルデータに戻す(タックルのみ)</button>
-    <button class="copybtn" onclick="clearAll()" style="margin-top:8px">タックル全削除</button>
   </div>
 </section>
 </div>
@@ -367,38 +327,12 @@ const state = {
 const RADII = {100:'100m', 300:'300m', 500:'500m'};
 const STYLE = {shore:'オカッパリ', boat:'ボート'};
 
-const SAMPLE_LURES = [
- {name:'ペンシルベイト 95', cat:'pencil', color:'natural'},
- {name:'バズベイト 3/8oz', cat:'buzz', color:'appeal'},
- {name:'フロッグ', cat:'frog', color:'dark'},
- {name:'シャロークランク SR', cat:'crank_sr', color:'appeal'},
- {name:'ミッドクランク MR', cat:'crank_mr', color:'natural'},
- {name:'スピナーベイト 3/8oz', cat:'spinnerbait', color:'appeal'},
- {name:'チャターベイト 3/8oz', cat:'chatter', color:'dark'},
- {name:'バイブレーション 60', cat:'vib', color:'appeal'},
- {name:'ジャークベイト 100SP', cat:'jerkbait', color:'natural'},
- {name:'シャッド 60SP', cat:'shad', color:'natural'},
- {name:'メタルバイブ 1/4oz', cat:'metal', color:'appeal'},
- {name:'ラバージグ 3/8oz+トレーラー', cat:'jig', color:'dark'},
- {name:'テキサスリグ(ホッグ系)', cat:'texas', color:'dark'},
- {name:'高比重スティックベイト ノーシンカー', cat:'nosinker', color:'natural'},
- {name:'ストレートワーム ネコリグ', cat:'neko', color:'natural'},
- {name:'ジグヘッドワッキー', cat:'wacky', color:'natural'},
- {name:'ダウンショット(シャッドテール)', cat:'downshot', color:'natural'},
- {name:'スモラバ 2.7g', cat:'smallrubber', color:'dark'},
- {name:'ジグヘッド+シャッドテール 3in', cat:'jighead', color:'natural'},
-];
-const SAMPLE_RODS = [
- {name:'スピニング ML', type:'spin', power:'ML'},
- {name:'ベイト M', type:'bait', power:'M'},
- {name:'ベイト MH', type:'bait', power:'MH'},
-];
-
 function load(k){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(e){return null} }
 function save(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
 
-let lures = load('bfg_lures') || SAMPLE_LURES.slice();
-let rods = load('bfg_rods') || SAMPLE_RODS.slice();
+// タックル登録機能は廃止(v1.3): 旧データを掃除
+try{['bfg_lures','bfg_rods','bfg_custom'].forEach(k=>localStorage.removeItem(k));}catch(e){}
+
 let fields = load('bfg_fields') || PRESET_FIELDS.slice();
 // プリセット湖の座標修正を保存済みデータにも反映
 fields.forEach(f=>{ const p=PRESET_FIELDS.find(x=>x.id===f.id); if(p){ f.lat=p.lat; f.lon=p.lon; } });
@@ -408,7 +342,6 @@ let lastPos = null;
 let testMode = load('bfg_testmode')===1;
 let testPos = null, tMap = null, tMarker = null;
 let clarMemo = load('bfg_clar') || {};
-let isSample = load('bfg_custom') ? false : true;
 state.fieldId = load('bfg_lastfield') || (fields[0] ? fields[0].id : 'other');
 if(state.fieldId!=='other' && !fields.find(f=>f.id===state.fieldId)) state.fieldId = fields[0]?fields[0].id:'other';
 
@@ -458,6 +391,7 @@ function buildForm(){
   chips('cRadius',RADII,'radius');
   chips('cCover',covOpts(),'cover'); chips('cDepth',DEPTH,'depth');
   state.testMode = testMode?'on':'off';
+  /* (旧: ルアー分類セレクトの生成はタックル登録廃止に伴い削除) */
   chips('cTestMode',{off:'OFF',on:'ON(疑似現在地)'},'testMode',()=>{
     testMode = state.testMode==='on';
     save('bfg_testmode', testMode?1:0);
@@ -465,8 +399,6 @@ function buildForm(){
   });
   document.getElementById('fAiModel').value=aiModel;
   if(aiKey) document.getElementById('fApiKey').placeholder='登録済み(変更する場合のみ入力)';
-  const sel=document.getElementById('fLureCat');
-  sel.innerHTML = CATS.map(c=>`<option value="${c.id}">${c.label}</option>`).join('');
 }
 function showTab(t){
   document.getElementById('pageGuide').style.display = t==='guide'?'':'none';
@@ -970,19 +902,12 @@ let aiModel = load('bfg_aimodel') || 'claude-opus-5';
 let aiHistory = [];
 const AI_SYSTEM = 'あなたは日本のバスフィッシングのプロガイドです。リザーバー・野池・霞ヶ浦水系のオカッパリとレンタルボートに精通しています。'
  +'回答は日本語で、現場で今すぐ実行できる具体性を最優先にしてください: どこに投げるか(立ち位置と狙う地形)、何を使うか、レンジ、リトリーブ速度やアクション、カラー。'
- +'ルアーは必ずユーザーの手持ちタックル一覧の中からだけ選ぶこと。'
+ +'ルアーはリグ・分類とウェイト/サイズで具体的に指示し(例: 3/8ozスピナーベイト、5inストレートワームのネコリグ)、必要なら定番の製品例を1つ添えてもよい。タックル(ロッド・ライン)の目安も一言添える。'
  +'アプリのルールベース推奨が添えられている場合は、賛成なら一言で補強し、別の手が良いと思えば理由を添えて代案を出すこと。'
  +'季節・水温・気象・ポイント地形の根拠を一言添える。全体は400字程度で簡潔に。'
  +'状況の「スタイル」がオカッパリの場合は、岸に立って岸際から沖へ探る前提で立ち位置とキャスト方向を指示する。'
  +'ボートの場合は、船を沖に置き岸・カバー・地形に向かってアプローチする前提で、船位や流し方(風・エレキの使い方)も含めて指示する。';
 
-function tackleText(){
-  const colorL={natural:'ナチュラル',appeal:'アピール',dark:'ダーク'};
-  const typeL={spin:'スピニング',bait:'ベイト',bf:'ベイトフィネス'};
-  const l=lures.map(x=>`- ${x.name}(${catById(x.cat).label}/${colorL[x.color]}系)`).join('\n');
-  const r=rods.map(x=>`- ${x.name}(${typeL[x.type]} ${x.power})`).join('\n');
-  return `【手持ちルアー】\n${l||'未登録'}\n【ロッド】\n${r||'未登録'}`;
-}
 async function callClaude(messages){
   const body={ model:aiModel, max_tokens:1500, system:AI_SYSTEM, messages };
   if(aiModel!=='claude-haiku-4-5') body.output_config={effort:'medium'};
@@ -1004,7 +929,7 @@ async function callClaude(messages){
   if(!res.ok){
     let msg='HTTP '+res.status;
     try{ const j=await res.json(); if(j.error&&j.error.message) msg=j.error.message; }catch(e){}
-    if(res.status===401) msg='APIキーが無効です。タックルタブの設定を確認してください。';
+    if(res.status===401) msg='APIキーが無効です。管理タブの設定を確認してください。';
     if(res.status===429) msg='利用制限に達しました。少し待ってから再試行してください。';
     throw new Error(msg);
   }
@@ -1034,7 +959,7 @@ function aiRenderThread(loading){
 async function startAiConsult(situation, picksText){
   const askEl=document.getElementById('inAsk');
   const ask=askEl?askEl.value.trim():'';
-  const first=`${situation}\n${tackleText()}\n【アプリ(ルールベース)の推奨】\n${picksText}`
+  const first=`${situation}\n【アプリ(ルールベース)の推奨】\n${picksText}`
     +(ask?`\n【現場からの追加情報】${ask}`:'')
     +'\n\nこの状況での最適な一手を教えてください。';
   aiHistory=[{role:'user',content:first}];
@@ -1107,62 +1032,12 @@ function delField(i){
   renderFields(); renderFieldChips();
 }
 
-/* ============ タックル管理 ============ */
+/* ============ 管理タブ ============ */
 function renderTackle(){
   renderFields();
   renderMyPoints();
-  document.getElementById('sampleNote').style.display = isSample?'':'none';
-  const ll=document.getElementById('lureList');
-  if(!lures.length){ ll.innerHTML='<div class="empty">ルアーが未登録です</div>'; }
-  else{
-    let html='';
-    const order={top:'トップウォーター',move:'巻きもの',bottom:'撃ちもの',fin:'フィネス'};
-    ['top','move','bottom','fin'].forEach(g=>{
-      const inG = lures.map((l,i)=>({l,i})).filter(x=>catById(x.l.cat).group===g);
-      if(!inG.length) return;
-      html+=`<div class="groupttl">${order[g]}</div>`;
-      inG.forEach(x=>{
-        const c=catById(x.l.cat);
-        const col={natural:'ナチュラル',appeal:'アピール',dark:'ダーク'}[x.l.color];
-        html+=`<div class="lure-item"><div><div class="nm">${esc(x.l.name)}</div>
-          <div class="meta">${c.label} / ${col}系</div></div>
-          <button onclick="delLure(${x.i})">削除</button></div>`;
-      });
-    });
-    ll.innerHTML=html;
-  }
-  const rl=document.getElementById('rodList');
-  rl.innerHTML = rods.length ? rods.map((r,i)=>{
-    const t={spin:'スピニング',bait:'ベイト',bf:'ベイトフィネス'}[r.type];
-    return `<div class="lure-item"><div><div class="nm">${esc(r.name)}</div>
-      <div class="meta">${t} / ${r.power}</div></div>
-      <button onclick="delRod(${i})">削除</button></div>`;
-  }).join('') : '<div class="empty">ロッドが未登録です</div>';
 }
 function esc(s){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function markCustom(){ isSample=false; save('bfg_custom',1); save('bfg_lures',lures); save('bfg_rods',rods); }
-function addLure(){
-  const name=document.getElementById('fLureName').value.trim();
-  if(!name) return;
-  lures.push({name, cat:document.getElementById('fLureCat').value, color:document.getElementById('fLureColor').value});
-  document.getElementById('fLureName').value='';
-  markCustom(); renderTackle();
-}
-function delLure(i){ lures.splice(i,1); markCustom(); renderTackle(); }
-function addRod(){
-  const name=document.getElementById('fRodName').value.trim();
-  if(!name) return;
-  rods.push({name, type:document.getElementById('fRodType').value, power:document.getElementById('fRodPower').value});
-  document.getElementById('fRodName').value='';
-  markCustom(); renderTackle();
-}
-function delRod(i){ rods.splice(i,1); markCustom(); renderTackle(); }
-function resetSample(){
-  lures=SAMPLE_LURES.slice(); rods=SAMPLE_RODS.slice(); isSample=true;
-  try{localStorage.removeItem('bfg_custom');localStorage.removeItem('bfg_lures');localStorage.removeItem('bfg_rods');}catch(e){}
-  renderTackle();
-}
-function clearAll(){ lures=[]; rods=[]; markCustom(); renderTackle(); }
 
 /* ============ 推奨エンジン ============ */
 function tempBand(t){ return t<8?0 : t<12?1 : t<16?2 : t<20?3 : t<26?4 : 5; }
@@ -1292,16 +1167,11 @@ function bestColor(ctx){
 }
 function rodFor(id){
   const g=catById(id).group;
-  let want;
-  if(id==='frog'||id==='swim') want={type:'bait',powers:['H','XH','MH']};
-  else if(g==='bottom'||id==='chatter'||id==='spinnerbait'||id==='buzz') want={type:'bait',powers:['MH','M','H']};
-  else if(g==='move') want={type:'bait',powers:['M','MH','ML']};
-  else if(id==='smallrubber') want={type:'bf',powers:['L','ML'],alt:'spin'};
-  else want={type:'spin',powers:['L','ML','UL']};
-  let r = rods.find(x=>x.type===want.type && want.powers.includes(x.power))
-       || rods.find(x=>x.type===want.type)
-       || (want.alt ? rods.find(x=>x.type===want.alt) : null);
-  return r ? r.name : null;
+  if(id==='frog'||id==='swim') return 'ベイト H〜XH';
+  if(g==='bottom'||id==='chatter'||id==='spinnerbait'||id==='buzz') return 'ベイト M〜MH';
+  if(g==='move') return 'ベイト M(小型プラグはスピニングMLでも可)';
+  if(id==='smallrubber') return 'ベイトフィネス or スピニング L';
+  return 'スピニング L〜ML';
 }
 function groupReason(g,ctx){
   switch(g){
@@ -1314,10 +1184,6 @@ function groupReason(g,ctx){
 
 function recommend(point){
   const el=document.getElementById('results');
-  if(!lures.length){
-    el.innerHTML='<div class="card empty">ルアーが未登録です。「タックル」タブで追加してください。</div>';
-    el.scrollIntoView({behavior:'smooth'}); return;
-  }
   const tIn=parseFloat(document.getElementById('inTemp').value);
   const temp = !isNaN(tIn) ? tIn : (state.autoTemp!=null ? state.autoTemp : MONTH_TEMP[state.month-1]);
   const tempSrc = !isNaN(tIn) ? '実測' : (state.autoTemp!=null ? '気温から推定' : '月から推定');
@@ -1328,9 +1194,8 @@ function recommend(point){
   // 水質をフィールドごとに記憶
   clarMemo[state.fieldId]=state.clarity; save('bfg_clar',clarMemo);
 
-  // 手持ちにあるカテゴリのみ
-  const owned=[...new Set(lures.map(l=>l.cat))];
-  let ranked=owned.map(id=>({id, s:scores[id]??0, g:catById(id).group})).sort((a,b)=>b.s-a.s);
+  // 全ルアー分類をスコア順に
+  let ranked=CATS.map(c=>({id:c.id, s:scores[c.id]??0, g:c.group})).sort((a,b)=>b.s-a.s);
 
   // グループを分散して上位3つ
   const picks=[]; const usedG=new Set();
@@ -1356,16 +1221,15 @@ function recommend(point){
 
   const pickNames=[];
   let recHtml='';
+  const groupL={top:'トップウォーター',move:'巻きもの',bottom:'撃ちもの',fin:'フィネス'};
   picks.forEach((p,idx)=>{
     const cat=catById(p.id);
-    const inCat=lures.filter(l=>l.cat===p.id);
-    const lure=inCat.find(l=>l.color===color.key)||inCat[0];
-    pickNames.push(`${idx+1}. ${lure.name}(${cat.label})`);
+    pickNames.push(`${idx+1}. ${cat.label}`);
     const rod=rodFor(p.id);
     const pct=Math.round(p.s/maxS*100);
     recHtml+=`<div class="card rec">
       <div class="head"><span class="rank">${idx+1}</span>
-        <div><div class="name">${esc(lure.name)}</div><div class="cat">${cat.label}</div></div></div>
+        <div><div class="name">${cat.label}</div><div class="cat">${groupL[p.g]}</div></div></div>
       <div class="fit"><div class="bar"><i style="width:${pct}%"></i></div><span>適合度 ${pct}</span></div>
       <dl class="kv">
         <dt>どこに</dt><dd>${ctx.style==='boat'&&cover.whereB?cover.whereB:cover.where}</dd>
@@ -1373,7 +1237,7 @@ function recommend(point){
         <dt>動かし方</dt><dd>${speedText(p.id,ctx)}</dd>
         <dt>カラー</dt><dd>${color.label}</dd>
       </dl>
-      ${rod?`<div class="tacklehint">推奨タックル: ${esc(rod)}</div>`:''}
+      <div class="tacklehint">推奨タックル: ${rod}</div>
       <div class="reason">${groupReason(p.g,ctx)}</div>
     </div>`;
   });
@@ -1395,7 +1259,7 @@ function recommend(point){
     startAiConsult(condCore, pickNames.join('\n'));
   }else{
     document.getElementById('aiBody').innerHTML=
-      '<p class="hint">「タックル」タブの設定でClaude APIキーを登録すると、ここにその場の状況を踏まえたプロの見解が自動表示されます。</p>';
+      '<p class="hint">「管理」タブの設定でClaude APIキーを登録すると、ここにその場の状況を踏まえたプロの見解が自動表示されます。</p>';
   }
   el.scrollIntoView({behavior:'smooth'});
 }
