@@ -796,7 +796,7 @@ async function scanPoints(){
     btn.disabled=false; return;
   }
   const lat=pos.coords.latitude, lon=pos.coords.longitude, acc=Math.round(pos.coords.accuracy||0);
-  lastPos={lat,lon,acc};
+  lastPos={lat,lon,acc,ts:Date.now()};
   // 最寄りの登録フィールドへ自動スイッチ(5km以内)
   let best=null;
   fields.forEach(f=>{ if(f.lat!=null){ const d=hav(lat,lon,f.lat,f.lon); if(d<5000&&(!best||d<best.d)) best={f,d}; }});
@@ -906,8 +906,16 @@ const AI_SYSTEM = 'あなたは日本のバスフィッシングのプロガイ�
  +'アプリのルールベース推奨が添えられている場合は、賛成なら一言で補強し、別の手が良いと思えば理由を添えて代案を出すこと。'
  +'季節・水温・気象・ポイント地形の根拠を一言添える。全体は400字程度で簡潔に。'
  +'状況の「スタイル」がオカッパリの場合は、岸に立って岸際から沖へ探る前提で立ち位置とキャスト方向を指示する。'
- +'ボートの場合は、船を沖に置き岸・カバー・地形に向かってアプローチする前提で、船位や流し方(風・エレキの使い方)も含めて指示する。';
+ +'ボートの場合は、船を沖に置き岸・カバー・地形に向かってアプローチする前提で、船位や流し方(風・エレキの使い方)も含めて指示する。'
+ +'「現在地の周辺ポイント」一覧がある場合はそれを地の利として活用し、今の場所で反応がない時の移動先(次の一手)を距離・方角つきで1つ提案する。';
 
+function nearbyText(){
+  if(!foundPoints.length || !lastPos) return '';
+  const srcL={my:'マイポイント', terrain:'地形', osm:'地図'};
+  const ageMin=lastPos.ts ? Math.round((Date.now()-lastPos.ts)/60000) : null;
+  const lines=foundPoints.slice(0,10).map(p=>`- ${p.name}(${p.label}/${srcL[p.src]||'地図'}) ${p.dir}${p.dist}m`);
+  return `【現在地の周辺ポイント(${ageMin!=null?ageMin+'分前':'直近'}のスキャン・半径${state.radius}m)】\n${lines.join('\n')}\n`;
+}
 async function callClaude(messages){
   const body={ model:aiModel, max_tokens:1500, system:AI_SYSTEM, messages };
   if(aiModel!=='claude-haiku-4-5') body.output_config={effort:'medium'};
@@ -959,7 +967,7 @@ function aiRenderThread(loading){
 async function startAiConsult(situation, picksText){
   const askEl=document.getElementById('inAsk');
   const ask=askEl?askEl.value.trim():'';
-  const first=`${situation}\n【アプリ(ルールベース)の推奨】\n${picksText}`
+  const first=`${situation}\n${nearbyText()}【アプリ(ルールベース)の推奨】\n${picksText}`
     +(ask?`\n【現場からの追加情報】${ask}`:'')
     +'\n\nこの状況での最適な一手を教えてください。';
   aiHistory=[{role:'user',content:first}];
@@ -1244,7 +1252,7 @@ function recommend(point){
 
   // 状況サマリー(Claude相談・コピー共用)
   const now=new Date();
-  const condCore=`【バス釣り状況】${f?f.name:FTYPE[ftype]}(${STYLE[ctx.style]}) ${now.getMonth()+1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} ${TIME[ctx.time]}/${SKY[ctx.sky]}/${WIND[ctx.wind]}/水温${temp}℃(${tempSrc})${lastWx?`/気温${lastWx.air}℃/風速${lastWx.wind}m/s/24h降水${lastWx.rain24}mm`:''}/${CLARITY[ctx.clarity]}/ポイント:${point?point.name+'('+cover.label+')':cover.label}/狙い:${DEPTH[ctx.depth]}`;
+  const condCore=`【バス釣り状況】${f?f.name:FTYPE[ftype]}(${STYLE[ctx.style]}) ${now.getMonth()+1}/${now.getDate()} ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} ${TIME[ctx.time]}/${SKY[ctx.sky]}/${WIND[ctx.wind]}/水温${temp}℃(${tempSrc})${lastWx?`/気温${lastWx.air}℃/風速${lastWx.wind}m/s/24h降水${lastWx.rain24}mm`:''}/${CLARITY[ctx.clarity]}/ポイント:${point?point.name+'('+cover.label+'・現在地から'+point.dir+point.dist+'m)':cover.label}/狙い:${DEPTH[ctx.depth]}`;
 
   // 結果: 戦略メモ → Claudeの見解(主役) → 定石ローテーション(折りたたみ・保険)
   let html=`<div class="strategy">${memo}</div>`;
